@@ -41,11 +41,12 @@ HOMEWORK_VERDICTS = {
 
 def check_tokens():
     """Проверка доступности переменных окружения."""
-    if PRACTICUM_TOKEN and TELEGRAM_TOKEN and TELEGRAM_CHAT_ID:
-        return True
-    raise NoEnvVariableError(
-        'Отсутствует одна или несколько переменных окружения'
-    )
+    if not all([PRACTICUM_TOKEN, TELEGRAM_TOKEN, TELEGRAM_CHAT_ID]):
+        logger.critical('Отсутствует одна или несколько переменных окружения')
+        raise NoEnvVariableError(
+            'Отсутствует одна или несколько переменных окружения'
+        )
+    return True
 
 
 def send_message(bot, message):
@@ -89,7 +90,7 @@ def check_response(response):
         raise TypeError(
             'Струтура данных в ответе API не соответствует ожиданиям'
         )
-    if 'homeworks' not in response.keys():
+    if 'homeworks' not in response:
         raise CheckResponseError(
             'В ответе API нет ключа "homeworks"'
         )
@@ -118,41 +119,33 @@ def parse_status(homework):
 
 def main():
     """Основная логика работы бота."""
-    try:
-        check_tokens()
-    except NoEnvVariableError as critical:
-        logger.critical(critical)
-        raise NoEnvVariableError(
-            'Отсутствует одна или несколько переменных окружения'
-        )
+    if not check_tokens():
+        sys.exit()
 
     bot = telegram.Bot(token=TELEGRAM_TOKEN)
     timestamp = int(time.time())
+    previous_message = []
+    error_message = ''
 
     while True:
         try:
             response = get_api_answer(timestamp)
             check_response(response)
             homeworks = response['homeworks']
-            if not homeworks:
-                send_message(
-                    bot,
-                    'Статус домашних работ не изменен'
-                )
-                logger.debug('Сообщение успешно отправлено в чат')
-            else:
+            if homeworks != previous_message:
                 status = parse_status(homeworks[0])
                 send_message(
                     bot,
                     status
                 )
-                logger.debug('Сообщение успешно отправлено в чат')
             timestamp = response['current_date']
-            time.sleep(RETRY_PERIOD)
         except Exception as error:
             message = f'Сбой в работе программы: {error}'
-            logger.error(message)
-            raise error
+            if message != error_message:
+                logger.error(message)
+                error_message = message
+        finally:
+            time.sleep(RETRY_PERIOD)
 
 
 if __name__ == '__main__':
