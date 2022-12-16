@@ -9,7 +9,7 @@ import telegram
 from dotenv import load_dotenv
 
 from exceptions import (CheckResponseError, GetApiAnswerError,
-                        NoEnvVariableError, ParseStatusError, SendMessageError)
+                        ParseStatusError, SendMessageError)
 
 load_dotenv()
 
@@ -41,12 +41,7 @@ HOMEWORK_VERDICTS = {
 
 def check_tokens():
     """Проверка доступности переменных окружения."""
-    if not all([PRACTICUM_TOKEN, TELEGRAM_TOKEN, TELEGRAM_CHAT_ID]):
-        logger.critical('Отсутствует одна или несколько переменных окружения')
-        raise NoEnvVariableError(
-            'Отсутствует одна или несколько переменных окружения'
-        )
-    return True
+    return all([PRACTICUM_TOKEN, TELEGRAM_TOKEN, TELEGRAM_CHAT_ID])
 
 
 def send_message(bot, message):
@@ -88,28 +83,46 @@ def check_response(response):
     """Проверка ответа API."""
     if not isinstance(response, dict):
         raise TypeError(
-            'Струтура данных в ответе API не соответствует ожиданиям'
+            'Ответ API не является словарем'
         )
     if 'homeworks' not in response:
-        raise CheckResponseError(
+        raise KeyError(
             'В ответе API нет ключа "homeworks"'
+        )
+    if 'current_date' not in response:
+        raise KeyError(
+            'В ответе API нет ключа "current_date"'
         )
     if not isinstance(response['homeworks'], list):
         raise TypeError(
             'В ответе API данные домашек приходят не в виде списка'
         )
+    if not response['homeworks']:
+        raise CheckResponseError(
+            'Список домашних работ пуст'
+        )
 
 
 def parse_status(homework):
     """Извлечение статуса домашней работы."""
+    if not isinstance(homework, dict):
+        raise TypeError(
+            'Домашняя работа должна быть в виде словаря'
+        )
     try:
         homework_name = homework['homework_name']
-    except Exception:
-        raise ParseStatusError(
+    except KeyError:
+        raise KeyError(
             'В ответе API нет ключа "homework_name"'
         )
     try:
-        verdict = HOMEWORK_VERDICTS[homework['status']]
+        status = homework['status']
+    except KeyError:
+        raise KeyError(
+            'В ответе API нет ключа "status"'
+        )
+    try:
+        verdict = HOMEWORK_VERDICTS[status]
     except Exception:
         raise ParseStatusError(
             'Недокументированный статус домашки, либо домашка без статуса'
@@ -120,29 +133,45 @@ def parse_status(homework):
 def main():
     """Основная логика работы бота."""
     if not check_tokens():
+        logger.critical('Отсутствует одна или несколько переменных окружения')
         sys.exit()
 
     bot = telegram.Bot(token=TELEGRAM_TOKEN)
     timestamp = int(time.time())
-    previous_message = []
+    previous_message = dict()
     error_message = ''
+    info_message = ''
 
     while True:
         try:
             response = get_api_answer(timestamp)
             check_response(response)
-            homeworks = response['homeworks']
-            if homeworks != previous_message:
-                status = parse_status(homeworks[0])
+            homework = response['homeworks'][0]
+            if homework != previous_message:
+                status = parse_status(homework)
                 send_message(
                     bot,
                     status
                 )
+                previous_message = homework
             timestamp = response['current_date']
+        except CheckResponseError as info:
+            message = f'{info}'
+            if message != info_message:
+                logger.info(message)
+                send_message(
+                    bot,
+                    'Бот успешно начал работу'
+                )
+                info_message = message
         except Exception as error:
             message = f'Сбой в работе программы: {error}'
             if message != error_message:
                 logger.error(message)
+                send_message(
+                    bot,
+                    message
+                )
                 error_message = message
         finally:
             time.sleep(RETRY_PERIOD)

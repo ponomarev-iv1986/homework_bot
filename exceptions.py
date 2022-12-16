@@ -1,9 +1,3 @@
-class NoEnvVariableError(Exception):
-    """Отсутствует одна или несколько переменных окружения."""
-
-    pass
-
-
 class GetApiAnswerError(Exception):
     """Ошибка запроса к API-сервису."""
 
